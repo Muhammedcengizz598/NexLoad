@@ -29,7 +29,8 @@ import threading
 import time
 import json
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed, queue
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import queue
 from threading import Lock, Semaphore, Event
 from queue import Queue, PriorityQueue
 import traceback
