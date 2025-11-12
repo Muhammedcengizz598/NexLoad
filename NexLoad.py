@@ -2,20 +2,22 @@
 # -*- coding: utf-8 -*-
 """
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║                           NEXLOAD - PREMIUM EDITION                       ║
-║                        Professional Media Downloader                      ║
+║                    NEXLOAD - PREMIUM EDITION (OPTIMIZED)                  ║
+║                   Professional Media Downloader - Parallel                ║
 ╠═══════════════════════════════════════════════════════════════════════════╣
 ║  Creator: Muhammed Cengiz                                                 ║
-║  Version: 2.0 Premium                                                     ║
+║  Version: 2.0 Premium - Parallel Optimized                                ║
 ║  License: MIT                                                             ║
 ║                                                                           ║
 ║  Features:                                                                ║
-║  • Lightning-fast downloads with optimized performance                    ║
-║  • Multi-platform support (20+ platforms)                                 ║
+║  • ⚡ Multi-threaded parallel downloads (4-8 concurrent)                  ║
+║  • 🚀 Lightning-fast downloads with optimized performance                 ║
+║  • 🌐 Multi-platform support (20+ platforms)                              ║
 ║  • 4K video quality & 320kbps audio                                       ║
-║  • Batch download capabilities                                            ║
-║  • Advanced error handling & recovery                                     ║
-║  • Clean & elegant terminal interface                                     ║
+║  • 📦 Batch download with concurrent processing                           ║
+║  • 🔄 Advanced error handling & recovery                                  ║
+║  • 💎 Clean & elegant terminal interface                                  ║
+║  • 🧵 Thread-safe operations with queue management                        ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -27,6 +29,10 @@ import threading
 import time
 import json
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed, queue
+from threading import Lock, Semaphore, Event
+from queue import Queue, PriorityQueue
+import traceback
 
 class NexLoadCore:
     def __init__(self):
@@ -57,6 +63,24 @@ class NexLoadCore:
             '9': ('🎵 Audio Only (MP3 320kbps)', 'bestaudio/best')
         }
         
+        # Thread management
+        self.max_workers = self._get_optimal_workers()
+        self.download_lock = Lock()
+        self.stats_lock = Lock()
+        self.progress_lock = Lock()
+        self.download_semaphore = Semaphore(self.max_workers)
+        self.stop_event = Event()
+        
+        # Download statistics
+        self.download_stats = {
+            'total': 0,
+            'successful': 0,
+            'failed': 0,
+            'total_size': 0,
+            'total_time': 0,
+            'downloads': []
+        }
+        
         # Initialize colorama for cross-platform colors
         try:
             from colorama import init, Fore, Back, Style
@@ -74,6 +98,13 @@ class NexLoadCore:
         except ImportError:
             self.colors = {key: '' for key in ['primary', 'secondary', 'success', 'warning', 'error', 'info', 'highlight', 'reset']}
 
+    def _get_optimal_workers(self):
+        """CPU sayısına göre optimal worker sayısını belirler"""
+        import multiprocessing
+        cpu_count = multiprocessing.cpu_count()
+        # 4-8 arası optimal worker sayısı
+        return min(max(4, cpu_count), 8)
+
     def _get_downloads_path(self):
         """İşletim sistemine göre indirme klasörünü belirler"""
         if self.system == 'windows':
@@ -81,7 +112,6 @@ class NexLoadCore:
         elif self.system == 'darwin':  # macOS
             return str(Path.home() / 'Downloads' / 'NexLoad')
         else:  # Linux/Android
-            # Android için özel kontrol
             if os.path.exists('/sdcard'):
                 return '/sdcard/Download/NexLoad'
             return str(Path.home() / 'Downloads' / 'NexLoad')
@@ -94,19 +124,18 @@ class NexLoadCore:
         """Gelişmiş başlık banner'ını yazdırır"""
         c = self.colors
         print(f"{c['primary']}╔══════════════════════════════════════════════════════════════════════════╗{c['reset']}")
-        print(f"{c['primary']}║{c['highlight']}                          NEXLOAD v2.0 PREMIUM                          {c['primary']}║{c['reset']}")
-        print(f"{c['primary']}║{c['secondary']}                     Professional Media Downloader                      {c['primary']}║{c['reset']}")
+        print(f"{c['primary']}║{c['highlight']}                    NEXLOAD v2.0 PREMIUM (PARALLEL)                    {c['primary']}║{c['reset']}")
+        print(f"{c['primary']}║{c['secondary']}                 Professional Media Downloader - Optimized              {c['primary']}║{c['reset']}")
         print(f"{c['primary']}╠══════════════════════════════════════════════════════════════════════════╣{c['reset']}")
-        print(f"{c['primary']}║ {c['info']}⚡ Lightning Fast{c['reset']} • {c['success']}4K Quality{c['reset']} • {c['secondary']}320kbps Audio{c['reset']} • {c['warning']}Batch Download{c['reset']}   {c['primary']}║{c['reset']}")
+        print(f"{c['primary']}║ {c['info']}⚡ Multi-threaded{c['reset']} • {c['success']}4K Quality{c['reset']} • {c['secondary']}320kbps Audio{c['reset']} • {c['warning']}Batch Download{c['reset']}   {c['primary']}║{c['reset']}")
         print(f"{c['primary']}║ {c['info']}🌐 20+ Platforms:{c['reset']} YouTube, TikTok, Instagram, Pinterest, X...     {c['primary']}║{c['reset']}")
-        print(f"{c['primary']}║ {c['info']}💎 Premium Features:{c['reset']} {c['secondary']}Auto-merge • Smart fallback • Clean UI{c['reset']}       {c['primary']}║{c['reset']}")
+        print(f"{c['primary']}║ {c['info']}💎 Workers: {c['secondary']}{self.max_workers}{c['reset']} • {c['info']}Features:{c['reset']} {c['secondary']}Auto-merge • Smart fallback • Parallel{c['reset']}       {c['primary']}║{c['reset']}")
         print(f"{c['primary']}╚══════════════════════════════════════════════════════════════════════════╝{c['reset']}")
         print()
 
     def _print_loading_animation(self, text, duration=0):
         """Loading animasyonu - optimized"""
         c = self.colors
-        # Removed animation delay for faster execution
         print(f"{c['success']}✓{c['reset']} {text}")
 
     def _execute_command(self, command, show_output=False):
@@ -159,7 +188,6 @@ class NexLoadCore:
         if missing_packages:
             print(f"\n{c['warning']}📦 Installing {len(missing_packages)} missing packages...{c['reset']}")
             
-            # pip'i güncelle
             print(f"{c['info']}📦 Updating pip...{c['reset']}", end='', flush=True)
             self._execute_command(f"{sys.executable} -m pip install --upgrade pip --quiet")
             print(f"\r{c['success']}✓ Pip updated{c['reset']}")
@@ -169,7 +197,6 @@ class NexLoadCore:
                     self._reinstall_all_packages()
                     return
 
-        # yt-dlp'yi her zaman güncelle
         print(f"{c['info']}🔄 Updating yt-dlp...{c['reset']}", end='', flush=True)
         self._execute_command(f"{sys.executable} -m pip install --upgrade yt-dlp --quiet")
         print(f"\r{c['success']}✓ yt-dlp updated{c['reset']}")
@@ -226,7 +253,6 @@ class NexLoadCore:
                 pass
             
             def warning(self, msg):
-                # Hata mesajlarını filtrele
                 if 'ffmpeg' in msg.lower() or 'error' in msg.lower():
                     pass
             
@@ -258,7 +284,6 @@ class NexLoadCore:
         try:
             import yt_dlp
             
-            # Pinterest kısa linkini çöz
             if 'pin.it' in url.lower():
                 url = self._resolve_pinterest_url(url)
             
@@ -282,37 +307,31 @@ class NexLoadCore:
                     'has_audio': any(f.get('acodec', 'none') != 'none' for f in formats)
                 }
         except Exception as e:
-            print(f"{c['error']}❌ Error getting media info: {e}{c['reset']}")
             return None
 
-    def _download_media(self, url, quality_format, is_audio_only=False):
-        """Medyayı indirir"""
+    def _download_media(self, url, quality_format, is_audio_only=False, worker_id=0):
+        """Medyayı indirir - Thread-safe"""
         c = self.colors
-        download_info = {'success': False, 'filename': '', 'size': 0, 'speed': '', 'time': ''}
+        download_info = {'success': False, 'filename': '', 'size': 0, 'speed': '', 'time': '', 'worker_id': worker_id}
         
         try:
+            # Semaphore ile concurrent download kontrolü
+            self.download_semaphore.acquire()
+            
             import yt_dlp
             from tqdm import tqdm
             import time as time_module
             
             start_time = time_module.time()
             
-            # Pinterest kısa linkini çöz
             if 'pin.it' in url.lower():
-                print(f"{c['info']}🔗 Resolving Pinterest short link...{c['reset']}", end='', flush=True)
                 url = self._resolve_pinterest_url(url)
-                print(f"\r{c['success']}✓ Link resolved{c['reset']}")
             
-            # Spotify DRM kontrolü
             if 'spotify.com' in url.lower():
-                print(f"{c['error']}❌ Spotify DRM korumalı içerik! İndirilemez.{c['reset']}")
-                print(f"{c['info']}💡 Alternatif: YouTube Music, SoundCloud veya Deezer kullanabilirsiniz.{c['reset']}")
                 return False
             
-            # Special handling for Pinterest
             is_pinterest = 'pinterest.com' in url.lower()
             
-            # Dosya adı formatı
             if is_audio_only:
                 output_template = f'{self.downloads_path}/%(title)s.%(ext)s'
                 format_selector = 'bestaudio/best'
@@ -337,9 +356,10 @@ class NexLoadCore:
                                     total=total, 
                                     unit='B', 
                                     unit_scale=True,
-                                    desc=f'{c["info"]}⬇️ Downloading{c["reset"]}',
-                                    bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
-                                    ncols=100
+                                    desc=f'{c["info"]}[W{worker_id}] ⬇️{c["reset"]}',
+                                    bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}',
+                                    ncols=80,
+                                    position=worker_id
                                 )
                         
                         if self.pbar and 'downloaded_bytes' in d:
@@ -353,9 +373,6 @@ class NexLoadCore:
                         self.final_filename = d.get('filename', '')
                         download_info['filename'] = self.final_filename
                         download_info['size'] = self.total_bytes
-                    
-                    elif d['status'] == 'processing':
-                        print(f"{c['info']}⚙️ Processing video (merging/converting)...{c['reset']}")
 
             ydl_opts = {
                 'format': format_selector,
@@ -364,8 +381,8 @@ class NexLoadCore:
                 'writesubtitles': False,
                 'writeautomaticsub': False,
                 'ignoreerrors': False,
-                'quiet': False,
-                'no_warnings': False,
+                'quiet': True,
+                'no_warnings': True,
                 'nocheckcertificate': True,
                 'prefer_insecure': False,
                 'socket_timeout': 30,
@@ -376,11 +393,8 @@ class NexLoadCore:
                 'http_headers': {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 },
-                'quiet': True,
-                'no_warnings': True,
             }
 
-            # Special options for Pinterest
             if is_pinterest:
                 ydl_opts.update({
                     'format': 'best[ext=mp4]/best[ext=webm]/best',
@@ -389,7 +403,7 @@ class NexLoadCore:
                     'fragment_retries': 10,
                     'skip_unavailable_fragments': True,
                     'http_headers': {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                         'Accept-Language': 'en-US,en;q=0.5',
                         'Referer': 'https://www.pinterest.com/',
@@ -405,7 +419,6 @@ class NexLoadCore:
                     }],
                 })
             else:
-                # Video + Audio birleştirme için postprocessor - MP4 formatında
                 ydl_opts.update({
                     'postprocessors': [
                         {
@@ -432,94 +445,38 @@ class NexLoadCore:
             end_time = time_module.time()
             elapsed = end_time - start_time
             
-            # Calculate download stats
             if progress_hook.total_bytes > 0:
                 speed_mbps = (progress_hook.total_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
                 download_info['speed'] = f"{speed_mbps:.2f} MB/s"
                 download_info['time'] = f"{int(elapsed // 60)}m {int(elapsed % 60)}s" if elapsed >= 60 else f"{elapsed:.1f}s"
             
             download_info['success'] = True
-            self._display_download_table(download_info, is_audio_only)
+            
+            # Thread-safe stats update
+            with self.stats_lock:
+                self.download_stats['successful'] += 1
+                self.download_stats['total_size'] += progress_hook.total_bytes
+                self.download_stats['total_time'] += elapsed
+                self.download_stats['downloads'].append(download_info)
+            
             return True
 
         except Exception as e:
-            error_msg = str(e).lower()
-            
-            # DRM hatası kontrolü
-            if 'drm' in error_msg:
-                print(f"{c['error']}❌ DRM korumalı içerik! İndirilemez.{c['reset']}")
-                return False
-            
-            # Hata mesajlarını kullanıcı dostu hale getir
-            if 'ffmpeg' in error_msg and 'merging' in error_msg:
-                print(f"{c['warning']}⚠️ Kalite birleştirme başarısız, daha düşük bir çözün��rlüğe geçiliyor...{c['reset']}")
-            elif 'ffmpeg' in error_msg:
-                print(f"{c['warning']}⚠️ Video işleme başarısız, alternatif format deneniyor...{c['reset']}")
-            elif 'no video' in error_msg or 'no audio' in error_msg:
-                print(f"{c['warning']}⚠️ İstenen kalite bulunamadı, başka bir çözünürlük deneniyor...{c['reset']}")
-            elif 'connection' in error_msg or 'timeout' in error_msg:
-                print(f"{c['warning']}⚠️ Bağlantı sorunu, yeniden deneniyor...{c['reset']}")
-            elif 'not available' in error_msg or 'unavailable' in error_msg:
-                print(f"{c['warning']}⚠️ İçerik şu anda kullanılamıyor, başka bir kalite deneniyor...{c['reset']}")
-            else:
-                print(f"{c['warning']}⚠️ İndirme başarısız, alternatif yöntem deneniyor...{c['reset']}")
-            
+            with self.stats_lock:
+                self.download_stats['failed'] += 1
             return False
+        finally:
+            self.download_semaphore.release()
 
-    def _display_download_table(self, info, is_audio_only=False):
-        """Download bilgilerini tablo formatında gösterir"""
-        c = self.colors
-        
-        if not info.get('success'):
-            return
-            
-        # Get file info
-        try:
-            filename = Path(info.get('filename', 'Unknown')).name if info.get('filename') else 'Unknown'
-            size_mb = info.get('size', 0) / (1024 * 1024) if info.get('size', 0) > 0 else 0
-            speed = info.get('speed', 'N/A')
-            time_taken = info.get('time', 'N/A')
-            file_type = '🎵 Audio (MP3)' if is_audio_only else '🎬 Video (MP4)'
-            
-            # Table width
-            table_width = 76
-            
-            print(f"\n{c['success']}{'═' * table_width}{c['reset']}")
-            print(f"{c['primary']}{'  📊 DOWNLOAD COMPLETE - SUMMARY REPORT':^{table_width}}{c['reset']}")
-            print(f"{c['success']}{'═' * table_width}{c['reset']}")
-            
-            # Table rows
-            rows = [
-                ('📁 File Name', filename[:50] + '...' if len(filename) > 50 else filename),
-                ('📦 File Type', file_type),
-                ('💾 File Size', f'{size_mb:.2f} MB'),
-                ('⚡ Avg Speed', speed),
-                ('⏱️  Time Taken', time_taken),
-                ('📂 Location', str(Path(self.downloads_path).name)),
-            ]
-            
-            for label, value in rows:
-                print(f"{c['info']}  {label}{c['reset']}: {c['highlight']}{value}{c['reset']}")
-            
-            print(f"{c['success']}{'═' * table_width}{c['reset']}")
-            print(f"{c['secondary']}  ✨ Full path: {c['warning']}{self.downloads_path}{c['reset']}")
-            print(f"{c['success']}{'═' * table_width}{c['reset']}\n")
-        except Exception as e:
-            # Fallback to simple display if table fails
-            print(f"\n{c['success']}✅ Download completed: {c['highlight']}{info.get('filename', 'Unknown')}{c['reset']}")
-
-    def _fallback_download(self, url, is_audio_only=False):
+    def _fallback_download(self, url, is_audio_only=False, worker_id=0):
         """Alternatif kalitelerde indirme dener"""
         c = self.colors
-        print(f"{c['warning']}🔄 Trying alternative qualities...{c['reset']}")
-        
         is_pinterest = 'pinterest.com' in url.lower()
         
         if is_audio_only:
             fallback_formats = ['bestaudio', 'best']
         else:
             if is_pinterest:
-                # Pinterest için özel fallback formatları
                 fallback_formats = [
                     'best',
                     'best[height<=1080]',
@@ -539,11 +496,34 @@ class NexLoadCore:
                 ]
 
         for fmt in fallback_formats:
-            print(f"{c['info']}🎯 Trying format: {c['highlight']}{fmt}{c['reset']}")
-            if self._download_media(url, fmt, is_audio_only):
+            if self._download_media(url, fmt, is_audio_only, worker_id):
                 return True
         
         return False
+
+    def _download_worker(self, url, quality_format, is_audio_only, worker_id):
+        """Worker thread fonksiyonu"""
+        c = self.colors
+        try:
+            success = self._download_media(url, quality_format, is_audio_only, worker_id)
+            
+            if not success:
+                success = self._fallback_download(url, is_audio_only, worker_id)
+            
+            return {
+                'url': url,
+                'success': success,
+                'worker_id': worker_id
+            }
+        except Exception as e:
+            with self.stats_lock:
+                self.download_stats['failed'] += 1
+            return {
+                'url': url,
+                'success': False,
+                'worker_id': worker_id,
+                'error': str(e)
+            }
 
     def download_single_url(self):
         """Tek URL indirir"""
@@ -562,7 +542,6 @@ class NexLoadCore:
                 print(f"{c['error']}❌ Invalid URL! Please enter a supported platform link.{c['reset']}")
                 continue
 
-            # Video bilgilerini al
             print(f"{c['info']}🔍 Fetching media information...{c['reset']}", end='', flush=True)
             info = self._get_video_info(url)
             print(f"\r{c['success']}✓ Media information retrieved{c['reset']}")
@@ -572,7 +551,6 @@ class NexLoadCore:
                 self._reinstall_all_packages()
                 continue
 
-            # Bilgileri göster
             print(f"\n{c['success']}📊 MEDIA INFORMATION{c['reset']}")
             print(f"{c['info']}📺 Title: {c['highlight']}{info['title']}{c['reset']}")
             print(f"{c['info']}👤 Creator: {c['secondary']}{info['uploader']}{c['reset']}")
@@ -580,7 +558,6 @@ class NexLoadCore:
                 minutes, seconds = divmod(info['duration'], 60)
                 print(f"{c['info']}⏱️ Duration: {c['warning']}{int(minutes)}:{int(seconds):02d}{c['reset']}")
 
-            # Kalite seçimi
             print(f"\n{c['primary']}🎯 SELECT QUALITY:{c['reset']}")
             for key, (desc, _) in self.quality_options.items():
                 print(f"{c['secondary']}{key}.{c['reset']} {desc}")
@@ -596,31 +573,30 @@ class NexLoadCore:
 
             print(f"\n{c['success']}🚀 Downloading in '{desc.split(' ', 1)[1]}' quality...{c['reset']}")
             
-            # İndirmeyi dene
-            success = self._download_media(url, format_selector, is_audio_only)
+            success = self._download_media(url, format_selector, is_audio_only, worker_id=0)
             
             if not success:
                 print(f"{c['warning']}⚠️ First attempt failed, trying alternative methods...{c['reset']}")
-                success = self._fallback_download(url, is_audio_only)
+                success = self._fallback_download(url, is_audio_only, worker_id=0)
 
             if success:
                 print(f"{c['success']}✅ Download completed successfully!{c['reset']}")
             else:
                 print(f"{c['error']}❌ Download failed. Please check the URL or try again later.{c['reset']}")
-                print(f"{c['info']}💡 Tip: Some platforms may have restrictions or the content may be unavailable.{c['reset']}")
 
             input(f"\n{c['warning']}⏎ Press Enter to continue...{c['reset']}")
             break
 
     def download_multiple_urls(self):
-        """Çoklu URL indirir"""
+        """Çoklu URL'leri paralel olarak indirir"""
         c = self.colors
         urls = []
         
         print(f"\n{c['primary']}╔═══════════════════════════════════════════════════════════════╗{c['reset']}")
-        print(f"{c['primary']}║{c['highlight']}                      BATCH DOWNLOAD                        {c['primary']}║{c['reset']}")
+        print(f"{c['primary']}║{c['highlight']}                   BATCH DOWNLOAD (PARALLEL)                  {c['primary']}║{c['reset']}")
         print(f"{c['primary']}╚═══════════════════════════════════════════════════════════════╝{c['reset']}")
         print(f"{c['info']}💡 Enter one URL per line, leave empty line to finish{c['reset']}")
+        print(f"{c['info']}🧵 Parallel workers: {c['highlight']}{self.max_workers}{c['reset']}")
         
         while True:
             url = input(f"{c['secondary']}URL {len(urls)+1}: {c['reset']}").strip()
@@ -638,8 +614,7 @@ class NexLoadCore:
             print(f"{c['error']}❌ No valid URLs found!{c['reset']}")
             return
 
-        # Kalite seçimi
-        print(f"\n{c['success']}📦 {len(urls)} URLs ready for download!{c['reset']}")
+        print(f"\n{c['success']}📦 {len(urls)} URLs ready for parallel download!{c['reset']}")
         print(f"{c['primary']}🎯 Select quality for all files:{c['reset']}")
         
         for key, (desc, _) in self.quality_options.items():
@@ -654,35 +629,65 @@ class NexLoadCore:
         desc, format_selector = self.quality_options[choice]
         is_audio_only = choice == '9'
 
-        # Toplu indirme
-        print(f"\n{c['success']}🚀 Downloading {len(urls)} files in '{desc.split(' ', 1)[1]}' quality...{c['reset']}")
-        successful = 0
-        failed = 0
+        # Reset stats
+        with self.stats_lock:
+            self.download_stats = {
+                'total': len(urls),
+                'successful': 0,
+                'failed': 0,
+                'total_size': 0,
+                'total_time': 0,
+                'downloads': []
+            }
 
-        for i, url in enumerate(urls, 1):
-            print(f"\n{c['info']}📥 {i}/{len(urls)}: Processing...{c['reset']}")
+        print(f"\n{c['success']}🚀 Starting parallel download with {self.max_workers} workers...{c['reset']}")
+        print(f"{c['info']}📥 Processing {len(urls)} files in '{desc.split(' ', 1)[1]}' quality...{c['reset']}\n")
+        
+        start_time = time.time()
+        
+        # ThreadPoolExecutor ile paralel indirme
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = {}
             
-            success = self._download_media(url, format_selector, is_audio_only)
+            for idx, url in enumerate(urls):
+                future = executor.submit(
+                    self._download_worker,
+                    url,
+                    format_selector,
+                    is_audio_only,
+                    idx % self.max_workers
+                )
+                futures[future] = url
             
-            if not success:
-                success = self._fallback_download(url, is_audio_only)
-            
-            if success:
-                successful += 1
-            else:
-                failed += 1
-                print(f"{c['error']}❌ File {i} failed!{c['reset']}")
+            # Tamamlanan görevleri takip et
+            completed = 0
+            for future in as_completed(futures):
+                completed += 1
+                try:
+                    result = future.result()
+                except Exception as e:
+                    with self.stats_lock:
+                        self.download_stats['failed'] += 1
 
-        # Sonuç raporu - Tablo formatında
+        end_time = time.time()
+        total_elapsed = end_time - start_time
+
+        # Sonuç raporu
         table_width = 76
         print(f"\n{c['primary']}{'═' * table_width}{c['reset']}")
-        print(f"{c['highlight']}{'  📦 BATCH DOWNLOAD COMPLETE - SUMMARY REPORT':^{table_width}}{c['reset']}")
+        print(f"{c['highlight']}{'  📦 PARALLEL BATCH DOWNLOAD - SUMMARY REPORT':^{table_width}}{c['reset']}")
         print(f"{c['primary']}{'═' * table_width}{c['reset']}")
         
+        with self.stats_lock:
+            stats = self.download_stats.copy()
+        
         batch_rows = [
-            ('📊 Total Files', f'{len(urls)} files'),
-            ('✅ Successful', f'{successful} files', 'success'),
-            ('❌ Failed', f'{failed} files', 'error'),
+            ('📊 Total Files', f'{stats["total"]} files'),
+            ('✅ Successful', f'{stats["successful"]} files', 'success'),
+            ('❌ Failed', f'{stats["failed"]} files', 'error'),
+            ('💾 Total Size', f'{stats["total_size"] / (1024 * 1024):.2f} MB'),
+            ('⏱️ Total Time', f'{int(total_elapsed // 60)}m {int(total_elapsed % 60)}s'),
+            ('🧵 Workers Used', f'{self.max_workers} threads'),
             ('📂 Save Location', str(Path(self.downloads_path).name)),
         ]
         
@@ -707,13 +712,14 @@ class NexLoadCore:
             videos = [f for f in files if f.suffix.lower() in ['.mp4', '.mkv', '.avi', '.mov']]
             audios = [f for f in files if f.suffix.lower() in ['.mp3', '.wav', '.m4a', '.aac']]
             
-            print(f"\n{c['primary']}╔═══════════════════════════════════════════════════════════════╗{c['reset']}")
+            print(f"\n{c['primary']}╔════════════════════════════════���══════════════════════════════╗{c['reset']}")
             print(f"{c['primary']}║{c['highlight']}                   DOWNLOAD STATISTICS                   {c['primary']}║{c['reset']}")
             print(f"{c['primary']}╚═══════════════════════════════════════════════════════════════╝{c['reset']}")
             print(f"{c['info']}📁 Location: {c['highlight']}{self.downloads_path}{c['reset']}")
             print(f"{c['secondary']}🎬 Video files: {c['success']}{len(videos)}{c['reset']}")
             print(f"{c['secondary']}🎵 Audio files: {c['success']}{len(audios)}{c['reset']}")
             print(f"{c['secondary']}📦 Total files: {c['warning']}{len(files)}{c['reset']}")
+            print(f"{c['info']}🧵 Max Workers: {c['highlight']}{self.max_workers}{c['reset']}")
             
             if files:
                 total_size = sum(f.stat().st_size for f in files if f.is_file())
@@ -733,14 +739,13 @@ class NexLoadCore:
     def run(self):
         """Ana program döngüsü"""
         c = self.colors
-        # Başlangıç kontrolleri
         self._clear_screen()
         self._print_header()
         
-        print(f"{c['info']}🚀 Initializing NexLoad Premium...{c['reset']}")
+        print(f"{c['info']}🚀 Initializing NexLoad Premium (Parallel Optimized)...{c['reset']}")
         self.check_and_install_dependencies()
         self._create_download_directory()
-        print(f"{c['success']}✓ System ready!{c['reset']}\n")
+        print(f"{c['success']}✓ System ready with {self.max_workers} parallel workers!{c['reset']}\n")
         
         while True:
             self._clear_screen()
@@ -752,7 +757,7 @@ class NexLoadCore:
             
             menu_options = [
                 "🎬 Single Video/Audio Download",
-                "📦 Batch URL Download",
+                "📦 Batch URL Download (Parallel)",
                 "📊 Download Statistics",
                 "🔄 Refresh Dependencies",
                 "❌ Exit NexLoad"
